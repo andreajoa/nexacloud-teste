@@ -1,0 +1,33 @@
+name: Deploy NexaCloud
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci && npm run build
+      - name: Send to NexaCloud
+        id: deploy
+        env:
+          PREVIEW: ${{ github.event_name == 'pull_request' && '?preview=1' || '' }}
+        run: |
+          OIDC=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://app.nexaclouds.online" | jq -r .value)
+          cd dist
+          args=(); while IFS= read -r f; do args+=(-F "${f#./}=@$f"); done < <(find . -type f)
+          res=$(curl --fail-with-body -sS -X POST "https://app.nexaclouds.online/api/deploy/nexa-teste$PREVIEW" -H "Authorization: Bearer $OIDC" "${args[@]}")
+          echo "$res"
+          echo "url=$(echo "$res" | jq -r .url)" >> "$GITHUB_OUTPUT"
+      - name: Comment the preview URL
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body "NexaCloud preview: ${{ steps.deploy.outputs.url }}"
